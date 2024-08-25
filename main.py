@@ -159,7 +159,6 @@ def main(args):
         label_file = os.path.join(label_path, 'merged_frame' + '_' + str(frame_counter).zfill(3) + ".txt")
         content = changelabel(args, label_file)
         tracker.update(content)
-        tracker.print_event()
         tracker.draw_tracks(frame)
         # tracker.evalue(f'evalue/label_json/{frame_counter:04d}.json')
         # print('self.parking_occupancy_accuracy = ', tracker.parking_occupancy_accuracy)

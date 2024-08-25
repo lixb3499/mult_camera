@@ -49,7 +49,7 @@ def content2detections(content):
 
 
 class Tracker:
-    def __init__(self, content, frame_rate=6, tracker_id='scene_1'):
+    def __init__(self, content, frame_rate=6, camera_id='scene_1'):
         """
         初始化时需要读入第一帧文件的信息
         """
@@ -64,10 +64,10 @@ class Tracker:
         self.next_id = i + 1
         self.max_lost_number = 10
         self.KF = KalmanFilter()
-        self.camera_id = ''
+        self.camera_id = camera_id
         self.frame_rate = frame_rate
         self.confirm_frame = 3  # 设为确定态所需要连续匹配到的帧数
-        self.tracker_id = tracker_id  # 一个Map中可能有多个摄像头，每个摄像头对应一个跟踪器
+        # self.tracker_id = tracker_id  # 一个Map中可能有多个摄像头，每个摄像头对应一个跟踪器
 
     def iou_mat(self, content):
         """

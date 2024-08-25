@@ -16,52 +16,241 @@ from scipy.spatial.distance import euclidean
 import copy
 
 
-class Map(Tracker):
-    '''
-    class Map inherit from class Tracker
-    '''
-
-    def __init__(self, content, area_inf_list=None, lane_inf=None, frame_rate=6, camera_id=''):
-        super(Map, self).__init__(content, frame_rate)
-        '''
-        parking_id由Map分配
-        :param content: 第一帧检测到的信息，用于初始化跟踪器
-        :param parking_file: 拿到的地图的位置信息的文件
-        '''
-        # self.parking_list = [Parking(1, [100, 100, 2, 2]), Parking(2, [200, 200, 2, 3])]
-        self.tracker_list = self.init_tracker(content, frame_rate)
-        self.tracks = []
+class Map:
+    def __init__(self, content, area_inf_list=None, lane_inf=None, frame_rate=6):
+        self.scene_list = self.init_scene(content, frame_rate)
+        self.tracks_set = []
         if area_inf_list is None:
             area_inf_list = []
         self.areas = []
         # self.tracker_list = [Tracker(content, frame_rate)]
         self.threshold_in = 1  # 距离阈值，此处要改
         self.threshold_out = 1
-        self.camera_id = camera_id
         for i, area_inf in enumerate(area_inf_list):
             self.areas.append(Area(i, area_inf[0], area_inf[1]))
         self.lane = Lane(0, lane_inf[0], lane_inf[1]) if lane_inf else None
         self.update_info = None  # 此参数用于记录每次做更新操作时新创建的轨迹以及被移除的轨迹
-        # 车辆进出车道捕获率
-        # 车辆进出车位准确率
-        # 车道车行方向准确率
-        # 车位有车无车准确率
-        self.lane_entry_capture_rate = 0.9999
-        self.parking_entry_accuracy = 0.9999
-        self.lane_direction_accuracy = 0.9999
-        self.parking_occupancy_accuracy = 0.9999
 
-        self.parking_occupancy_up = 0  # 车位有无车辆
-        self.parking_occupancy_down = 0.1  # 分母
+    def init_scene(self, content, frame_rate):
+        """
+        初始化跟踪器列表
+        """
+        content1 = [item for item in content if item[-8:] == 'scene_1\n']
+        content2 = [item for item in content if item[-8:] == 'scene_2\n']
+        Scene1 = Scene(content1, frame_rate=frame_rate, camera_id='scene_1')
+        Scene2 = Scene(content2, frame_rate=frame_rate, camera_id='scene_2')
+        return [Scene1, Scene2]
 
-        self.lane_direction_up = 0  # 行驶方向
-        self.lane_direction_d = 0.1
+    def update(self, content):
+        content1 = [item for item in content if item[-8:] == 'scene_1\n']
+        content2 = [item for item in content if item[-8:] == 'scene_2\n']
+        self.scene_list[0].update(content1)
+        self.scene_list[1].update(content2)
+        self.match_tracks()
 
-        self.parking_entry_up = 0
-        self.parking_entry_d = 0.1
+    def match_tracks(self):
+        """
+        用于不同摄像头下的跟踪器之间的轨迹匹配
+        """
+        self.preprocess_matched_tracks()
+        self.scene_list[0].update_tracks()
+        self.scene_list[1].update_tracks()
 
-        self.lane_entry_capture_up = 0
-        self.lane_entry_capture_d = 0.1
+        n1 = len(self.scene_list[0].not_matched_tracks)
+        n2 = len(self.scene_list[1].not_matched_tracks)
+        if n1 == 0 and n2 == 0:
+            return
+
+        if n1 > 0 and n2 > 0:
+            point_n1_list = np.array([track.box_center for track in self.scene_list[0].not_matched_tracks])
+            point_n2_list = np.array([track.box_center for track in self.scene_list[1].not_matched_tracks])
+            distance_matrix = cdist(point_n1_list, point_n2_list)
+
+            if not np.all(distance_matrix == 0):
+                track1_indices, track2_indices = linear_sum_assignment(distance_matrix)
+            else:
+                track1_indices, track2_indices = ([], [])
+
+            matched_pairs_scene1 = set()
+            matched_pairs_scene2 = set()
+            for j in range(len(track1_indices)):
+                index1 = track1_indices[j]
+                index2 = track2_indices[j]
+                track1 = self.scene_list[0].not_matched_tracks[index1]
+                track2 = self.scene_list[1].not_matched_tracks[index2]
+                dis = euclidean(point_n1_list[index1], point_n2_list[index2])
+                if dis <= 2:
+                    # Update matching properties
+                    track1.match_between_scene = True
+                    track1.matched_id = track2.track_id
+                    track1.matched_scene = self.scene_list[1].camera_id
+
+                    track2.match_between_scene = True
+                    track2.matched_id = track1.track_id
+                    track2.matched_scene = self.scene_list[0].camera_id
+
+                    # Store matched tracks as a tuple
+                    self.tracks_set.append((track1, track2))
+                    matched_pairs_scene1.add(index1)
+                    matched_pairs_scene2.add(index2)
+
+            # Add unmatched tracks from both scenes
+            for i, track in enumerate(self.scene_list[0].not_matched_tracks):
+                if i not in matched_pairs_scene1:
+                    self.tracks_set.append(track)
+            for i, track in enumerate(self.scene_list[1].not_matched_tracks):
+                if i not in matched_pairs_scene2:
+                    self.tracks_set.append(track)
+        else:
+            # Handle cases where one of the scene lists is empty
+            if n1 == 0:
+                self.tracks_set.extend(self.scene_list[1].not_matched_tracks)
+            if n2 == 0:
+                self.tracks_set.extend(self.scene_list[0].not_matched_tracks)
+
+    def preprocess_matched_tracks(self):
+        """
+        处理已匹配轨迹对的距离，如果距离大于8，则解除匹配关联。
+        只保留距离小于8的匹配对。
+        """
+        new_tracks = []
+        for pair in self.tracks_set:
+            if isinstance(pair, tuple):  # 确认是否为匹配对
+                track1, track2 = pair
+                distance = euclidean(track1.box_center, track2.box_center)
+                if distance <= 2:
+                    # 保持匹配状态
+                    new_tracks.append(pair)
+                else:
+                    # 解除匹配关联
+                    track1.match_between_scene = False
+                    track1.matched_id = None
+                    track1.matched_scene = None
+                    track2.match_between_scene = False
+                    track2.matched_id = None
+                    track2.matched_scene = None
+        self.tracks_set = new_tracks
+
+    def match_tracks__(self):
+        """
+        用于不同摄像头下的跟踪器之间的轨迹匹配
+        """
+
+        n1 = len(self.scene_list[0].not_matched_tracks)
+        n2 = len(self.scene_list[1].not_matched_tracks)
+        dis_mat = np.zeros((n1, n2))
+        point_n1_list = np.array([track.box_center for track in self.scene_list[0].not_matched_tracks])
+        point_n2_list = np.array([track.box_center for track in self.scene_list[1].not_matched_tracks])
+        # 使用 cdist 函数计算距离矩阵
+        if n1 == 0:
+            if n2 == 0:
+                self.tracks = []
+                return
+            else:
+                self.tracks = self.scene_list[1].tracks
+                return
+
+        if n2 == 0:
+            if n1 == 0:
+                self.tracks = []
+                return
+            else:
+                self.tracks = self.scene_list[0].tracks
+                return
+        distance_matrix = cdist(point_n1_list, point_n2_list)  # 矩阵中的每个元素 (i, j) 代表 array1[i] 到 array2[j] 的欧几里得距离。
+        if np.all(distance_matrix == 0):
+            track1_indices, track2_indices = ([], [])
+        else:
+            track1_indices, track2_indices = linear_sum_assignment(distance_matrix)
+        # self.tracks = self.tracker_list[0].tracks
+        self.tracks = copy.deepcopy(self.scene_list[0].tracks)
+        # for i, track2 in enumerate(self.scene_list[1].tracks):
+        #     if i not in track2_indices:
+        #         self.tracks.append(self.scene_list[1].tracks[i])
+        #     else:
+        #         # try:
+        #         # 获取元素在列表中的索引
+        #         # j = track2_indices.index(i)  # 场景2中i匹配到场景1中的j
+        #         # numpy.where 函数返回一个元组，其中元素是包含符合条件的索引的数组。在这种情况下，我们只关心第一个维度上的索引，因此使用 indices[0]。
+        #         j = np.where(track2_indices == i)[0][0]
+        #         dis = euclidean(point_n1_list[j], point_n2_list[i])
+        #         if dis > 0.1:
+        #             self.tracks.append(copy.deepcopy(self.scene_list[1].tracks[i]))
+        #             # import sys
+        #             # sys.exit()
+        #         # except ValueError:
+        #         #     print(f"Error in linear_sum_assignment")
+
+        for i, track2 in enumerate(self.scene_list[1].tracks):
+            if i in track2_indices:
+                j = np.where(track2_indices == i)[0][0]
+                track1 = self.scene_list[0].tracks[j]
+                dis = euclidean(point_n1_list[j], point_n2_list[i])
+                if dis <= 0.1:
+                    # Update matched tracks properties
+                    track1.match_between_scene = True
+                    track1.matched_id = track2.track_id
+                    track1.matched_scene = self.scene_list[1].camera_id
+
+                    track2.match_between_scene = True
+                    track2.matched_id = track1.track_id
+                    track2.matched_scene = self.scene_list[0].camera_id
+            else:
+                self.tracks.append(copy.deepcopy(track2))
+
+    def get_area(self, id):
+        for area in self.areas:
+            if area.id == id:
+                return area
+        return None
+
+    def get_track(self, id):
+        for track in self.tracks_set:
+            if track.track_id == id:
+                return track
+        return None
+
+    def draw_tracks(self, img):
+        for track in self.tracks_set:
+            if isinstance(track, tuple):
+                track = track[1]
+            if track.confirmflag:
+                track.draw(img)
+
+    def draw_area(self, frame):
+        for area in self.areas:
+            area.draw(frame)
+        self.lane.draw(frame)
+
+
+class Scene(Tracker):
+    '''
+    class Map inherit from class Tracker
+    '''
+
+    def __init__(self, content, area_inf_list=None, lane_inf=None, frame_rate=6, camera_id=''):
+        super(Scene, self).__init__(content, frame_rate, camera_id)
+        '''
+        parking_id由Map分配
+        :param content: 第一帧检测到的信息，用于初始化跟踪器
+        :param parking_file: 拿到的地图的位置信息的文件
+        '''
+        self.range = [(0, 0), (1, 1)]  # 该摄像头所管理的场景的范围
+        self.camera_location = (0, 0)
+        self.tracks = []  # 检测到的所有的轨迹
+        self.matched_tracks = []  # 与其他scene中的轨迹匹配上了的轨迹的列表
+        self.not_matched_tracks = []  # 没有与其他scene中的轨迹匹配上的轨迹的列表
+        if area_inf_list is None:
+            area_inf_list = []
+        self.areas = []
+        # self.tracker_list = [Tracker(content, frame_rate)]
+        self.threshold_in = 1  # 距离阈值，此处要改
+        self.threshold_out = 1
+        # self.camera_id = camera_id
+        for i, area_inf in enumerate(area_inf_list):
+            self.areas.append(Area(i, area_inf[0], area_inf[1]))
+        self.lane = Lane(0, lane_inf[0], lane_inf[1]) if lane_inf else None
+        self.update_info = None  # 此参数用于记录每次做更新操作时新创建的轨迹以及被移除的轨迹
 
     def init_tracker(self, content, frame_rate):
         """
@@ -72,6 +261,26 @@ class Map(Tracker):
         tracker1 = Tracker(content1, frame_rate, 'scene_1')
         tracker2 = Tracker(content2, frame_rate, 'scene_2')
         return [tracker1, tracker2]
+
+    def update(self, content):
+        # content1 = [item for item in content if item[-8:] == 'scene_1\n']
+        # content2 = [item for item in content if item[-8:] == 'scene_2\n']
+        # self.tracker_list[0].update(content1)
+        # self.tracker_list[1].update(content2)
+        # self.match_tracks()
+
+        removed_track, added_track = super().update(content)
+        self.update_tracks()
+
+        # self.update_count((removed_track, added_track))
+        # self.update_events()  # 事件的更新
+
+    def update_tracks(self):
+        """
+        更新matched_tracks， not_matched_tracks这些
+        """
+        self.matched_tracks = [track for track in self.tracks if track.match_between_scene]  # 浅拷贝
+        self.not_matched_tracks = [track for track in self.tracks if not track.match_between_scene]
 
     def match_tracks(self):
         '''
@@ -123,7 +332,6 @@ class Map(Tracker):
                 # except ValueError:
                 #     print(f"Error in linear_sum_assignment")
 
-
     def get_area(self, id):
         for area in self.areas:
             if area.id == id:
@@ -149,6 +357,7 @@ class Map(Tracker):
         for track in self.tracks:
             if track.confirmflag:
                 track.draw(img)
+
     def nearest_area_distance(self, track, flag):
         if flag == 'remove':
             point = track.trace_point_list[-1]
@@ -164,17 +373,6 @@ class Map(Tracker):
                 min_area_id = area.id
 
         return min_area_id, min_distance
-
-    def update(self, content):
-        content1 = [item for item in content if item[-8:] == 'scene_1\n']
-        content2 = [item for item in content if item[-8:] == 'scene_2\n']
-        self.tracker_list[0].update(content1)
-        self.tracker_list[1].update(content2)
-        self.match_tracks()
-
-        # removed_track, added_track = super().update(content)
-        # self.update_count((removed_track, added_track))
-        # self.update_events()  # 事件的更新
 
     def update_count(self, update_info):
         """
@@ -563,21 +761,3 @@ class Lane(Area):
                 else:
                     self.count_car = self.count_car - 1
                 return border_line
-
-
-if __name__ == "__main__":
-    video_path = "test100_6mm/connect.avi"
-    label_path = "test100_6mm/point_center"
-    file_name = ""  # label文件数字前的
-    # cap = cv2.VideoCapture(video_path)
-    # frame_number = cap.get(cv2.CAP_PROP_FRAME_COUNT)
-    # print(f"Video FPS: {frame_number}")
-    # SAVE_VIDEO = True  # True
-    # current_time = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    # if not os.path.exists('video_out'):
-    #     os.mkdir('video_out')
-    with open(os.path.join(label_path, file_name + str(0) + ".txt"), 'r') as f:
-        content = f.readlines()
-        map = Map(content)
-    a = map.iou_mat(content)
-    print(a)

@@ -13,6 +13,9 @@ class Tracks:
                  camera_id=''):
         # 默认初始化状态为[x ,y, w, h, 0, 0]
         # initial_state =
+        self.match_between_scene = False  # 这个属性标志有没有匹配到另外一个场景中的轨迹
+        self.matched_id = None  # 匹配到的另一个场景的轨迹的id
+        self.matched_scene = None  # 匹配到哪一个场景中的轨迹 没有则为None
         self.h = 2  # 用中心点初始化时设置默认边框大小
         if len(initial_state) == 2:
             self.X = np.append(initial_state, [self.h, self.h, 0, 0])
