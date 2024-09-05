@@ -94,7 +94,7 @@ class Tracks:
         else:
             return False
 
-    def update(self, target_xywh=None):
+    def update(self, target_xywh=None, licence='Not', licence_cls='detected'):
         """
         更新轨迹信息。
 
@@ -136,6 +136,10 @@ class Tracks:
         self.update_v_list(2)
         self.v_average = np.mean(self.trace_v_list_value)
         self.updatestoptime()
+        # 更新车牌信息
+        if licence != 'Not':
+            self.licence = licence
+            self.licence_cls=licence_cls
         if self.stoptime > 60:
             self.parking_violation = True
 
@@ -169,31 +173,36 @@ class Tracks:
         if self.ifstop(self.v_Threshold):
             self.stoptime = self.stoptime + 1 / self.frame_rate
 
-    def draw(self, img):
+    def draw(self, img, flag=1):
+        '''
+        如果flag为0， 则说明不需要画出车牌等信息
+        '''
+
         # fig, ax = create_ax()
         text_coord = subtract_tuples(coord_to_pixel(ax, (self.target_box[0], self.target_box[1])), (30, 5))
         draw_trace(ax, img, self.trace_point_list)
-        if self.ifstop(self.v_Threshold):
-            if self.id_matched:
-                cv2.putText(img,
-                            f"Tracking  ID={self.track_id}, {self.camera_id}",
-                            text_coord, cv2.FONT_HERSHEY_SIMPLEX,
-                            0.7, (255, 0, 0), 2)
+        if flag:
+            if self.ifstop(self.v_Threshold):
+                if self.id_matched:
+                    cv2.putText(img,
+                                f"Tracking  ID={self.track_id}, {self.camera_id}, {self.licence}",
+                                text_coord, cv2.FONT_HERSHEY_SIMPLEX,
+                                0.7, (255, 0, 0), 2)
+                else:
+                    cv2.putText(img, f"Lost ID={self.track_id}, {self.camera_id}, {self.licence}",
+                                text_coord,
+                                cv2.FONT_HERSHEY_SIMPLEX,
+                                0.7, (255, 255, 0), 2)
             else:
-                cv2.putText(img, f"Lost ID={self.track_id}, {self.camera_id}",
-                            text_coord,
-                            cv2.FONT_HERSHEY_SIMPLEX,
-                            0.7, (255, 255, 0), 2)
-        else:
-            if self.id_matched:
-                cv2.putText(img,
-                            f"Tracking  ID={self.track_id}, {self.camera_id}",
-                            text_coord, cv2.FONT_HERSHEY_SIMPLEX,
-                            0.7, (255, 0, 0), 2)
-            else:
-                cv2.putText(img,
-                            f"Lost ID={self.track_id}, {self.camera_id}",
-                            text_coord,
-                            cv2.FONT_HERSHEY_SIMPLEX,
-                            0.7, (255, 255, 0), 2)
+                if self.id_matched:
+                    cv2.putText(img,
+                                f"Tracking  ID={self.track_id}, {self.camera_id}, {self.licence}",
+                                text_coord, cv2.FONT_HERSHEY_SIMPLEX,
+                                0.7, (255, 0, 0), 2)
+                else:
+                    cv2.putText(img,
+                                f"Lost ID={self.track_id}, {self.camera_id}, {self.licence}",
+                                text_coord,
+                                cv2.FONT_HERSHEY_SIMPLEX,
+                                0.7, (255, 255, 0), 2)
         plot_one_box(ax, self.target_box, img, color=(255, 0, 255), target=self.max_iou_matched)

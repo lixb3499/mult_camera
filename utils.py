@@ -20,7 +20,7 @@ def xyxy_to_xywh(xyxy):
     return center_x, center_y, w, h
 
 
-def plot_one_box(ax, xyxy, img, color=(0, 200, 0), target=False):
+def plot_one_box(ax, xyxy, img, color=(0, 200, 0), target=False, thickness=1):
     """
     在图像上绘制单个边界框。这个函数用于在图像上绘制边界框。参数xyxy是边界框的坐标（左上角和右下角），
     img是输入的图像，color是边界框的颜色，默认为绿色，target是一个标志，如果为True，则使用红色表示边界框，
@@ -31,13 +31,43 @@ def plot_one_box(ax, xyxy, img, color=(0, 200, 0), target=False):
         img (numpy.ndarray): 输入图像。
         color (tuple): 边界框颜色 (默认为绿色)。
         target (bool): 标志指示边界框是否表示目标 (默认为False)。
+        thickness (int): 边界框的厚度 (默认为1)。
     """
-    xy1 = coord_to_pixel(ax, (xyxy[0], xyxy[1]))
-    xy2 = coord_to_pixel(ax, (xyxy[2], xyxy[3]))
+    # 获取像素坐标
+    xy1 = coord_to_pixel(ax, (xyxy[0], xyxy[1]), img.shape[0])  # 使用img.shape[0]作为y_range
+    xy2 = coord_to_pixel(ax, (xyxy[2], xyxy[3]), img.shape[0])
+
+    # 如果是目标，设置颜色为红色
     if target:
         color = (0, 0, 255)
-    cv2.rectangle(img, xy1, xy2, color, 1, cv2.LINE_AA)  # filled
 
+    # 在图像上绘制边界框
+    cv2.rectangle(img, xy1, xy2, color, thickness, cv2.LINE_AA)
+
+
+def add_shadow_to_box(ax, xyxy, img, shadow_color=(0, 0, 0), alpha=0.3):
+    """
+    在图像的矩形框内添加一个半透明的阴影。使用alpha控制阴影的透明度。
+
+    参数:
+        ax (matplotlib.axes._axes.Axes): Matplotlib的坐标轴对象。
+        xyxy (list): 矩形框的坐标 (x1, y1, x2, y2)。
+        img (numpy.ndarray): 输入图像。
+        shadow_color (tuple): 阴影的颜色，默认为黑色 (0, 0, 0)。
+        alpha (float): 阴影的透明度，取值范围为0到1，0表示完全透明，1表示不透明。
+    """
+    # 获取矩形框的像素坐标
+    xy1 = coord_to_pixel(ax, (xyxy[0], xyxy[1]), img.shape[0])
+    xy2 = coord_to_pixel(ax, (xyxy[2], xyxy[3]), img.shape[0])
+
+    # 创建一个覆盖在原图上的阴影层
+    shadow_layer = img.copy()
+
+    # 在阴影层上填充矩形框内部
+    cv2.rectangle(shadow_layer, xy1, xy2, shadow_color, thickness=-1)  # thickness=-1 表示填充
+
+    # 通过线性插值的方法实现半透明效果
+    cv2.addWeighted(shadow_layer, alpha, img, 1 - alpha, 0, img)
 
 def plot_box_map(ax, box_coords):
     """
@@ -74,6 +104,14 @@ def updata_trace_list(box_center, trace_list, max_list_len=50):
         trace_list.pop(0)
         trace_list.append(box_center)
     return trace_list
+
+def draw_line(ax, img, point1, point2):
+    point1 = coord_to_pixel(ax, point1)
+    point2 = coord_to_pixel(ax, point2)
+
+    cv2.line(img,
+             point1, point2,
+             (0, 0, 128), 6)
 
 
 def draw_trace(ax, img, trace_list):

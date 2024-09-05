@@ -1,7 +1,7 @@
 import os
 import cv2
 from utils import plot_one_box, cal_iou, xyxy_to_xywh, xywh_to_xyxy, updata_trace_list, draw_trace, intersect, ccw, \
-     Coord_prcssing
+    Coord_prcssing
 import datetime
 from tracks import Tracks
 from tracker import Tracker
@@ -15,6 +15,8 @@ from Map import Map
 import argparse
 from changelabel import changelabel
 import sys
+
+
 # from globle_variable import create_ax
 
 class Logger(object):
@@ -82,7 +84,7 @@ def main(args):
         os.mkdir('video_out')
     video_filename = os.path.join('video_out', 'exp' + current_time + '.mp4')
     log_file_name = os.path.join('log', 'exp' + current_time + '.log')
-    # redirect_print_to_log(log_file_name)#重新定位到log文件
+    redirect_print_to_log(log_file_name)  # 重新定位到log文件
 
     frame_rate = args.frame_rate
     filelist = os.listdir(label_path)
@@ -94,9 +96,6 @@ def main(args):
     ax.set_xlim(args.x_lim)
     ax.set_ylim(args.y_lim)
     # ax.invert_yaxis()
-
-    p1 = [-3.514750679042191, 2.5108268000196183, -6.514750679042191, 4.897439760168044]
-
 
     areas_list = Coord_prcssing(args.coords)
     lane = args.lane
@@ -121,13 +120,12 @@ def main(args):
 
     frame = img_array
 
-
     # 设置视频编解码器
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
 
     if SAVE_VIDEO:
         # 创建视频写入对象
-        video_writer = cv2.VideoWriter(video_filename, fourcc, 3*frame_rate,
+        video_writer = cv2.VideoWriter(video_filename, fourcc, 3 * frame_rate,
                                        (100 * args.fig_size[0], 100 * args.fig_size[1]))
 
     # mat = tracker.iou_mat(content)
@@ -148,17 +146,10 @@ def main(args):
         print(f"\r当前帧数：{frame_counter}/{frame_number}\n", end=' ')
         if frame_counter > frame_number:
             break
-        # label_file_path = os.path.join(label_path, file_name + "_" + str(frame_counter) + ".txt")
-        # label_file_path = os.path.join(label_path, file_name + str(frame_counter) + ".txt")
-        # if not os.path.exists(label_file_path):
-        #     with open(label_file_path, "w") as f:
-        #         pass
-        # with open(label_file_path, "r", encoding='utf-8') as f:
-        #     content = f.readlines()
-        #     # track.predict()
         label_file = os.path.join(label_path, 'merged_frame' + '_' + str(frame_counter).zfill(3) + ".txt")
         content = changelabel(args, label_file)
         tracker.update(content)
+        tracker.draw_area(frame)
         tracker.draw_tracks(frame)
         # tracker.evalue(f'evalue/label_json/{frame_counter:04d}.json')
         # print('self.parking_occupancy_accuracy = ', tracker.parking_occupancy_accuracy)
@@ -171,7 +162,7 @@ def main(args):
         #     previous_point = track.trace_point_list[-2]
         #     tracker.intersect(point, previous_point)
         # tracker.update_count()
-        tracker.draw_area(frame)
+
 
         # cv2.putText(frame, "ALL BOXES(Green)", (25, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 200, 0), 2)
         # cv2.putText(frame, "TRACKED BOX(Red)", (25, 75), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
@@ -179,7 +170,23 @@ def main(args):
         #     cv2.putText(frame, f"count of area_{area.id}:    {area.count_car}", (25, 100 + 25 * area.id),
         #                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 255),
         #                 2)
-        cv2.putText(frame, f"{frame_counter}/{frame_number}", (25, 125 + 25 * len(tracker.areas)), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+        cv2.putText(frame, f"{frame_counter}/{frame_number}", (25, 125 + 25 * len(tracker.areas)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+
+        cv2.putText(frame, f"{frame_counter}/{frame_number}", (25, 125 + 25 * len(tracker.areas)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+        height, width, _ = frame.shape
+        lower_half = frame[height // 2:, :]
+        upper_half = frame[:height // 2, :]
+
+        # 标注 "Camera2" 在下半部分
+        cv2.putText(lower_half, "Camera1", (25, 35), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 255, 0), 2)
+
+        # 标注 "Camera1" 在上半部分
+        cv2.putText(upper_half, "Camera2", (25, 100), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 255, 0), 2)
+
+        # 合并上下两部分
+        frame = np.vstack((upper_half, lower_half))
 
         cv2.imshow('track', frame)
         if SAVE_VIDEO:
@@ -196,7 +203,8 @@ def parse_args():
     parser = argparse.ArgumentParser()
 
     # 添加参数
-    parser.add_argument('--data_file', type=str, default=r'G:\jieshun\project_data\multi_cam\8_20\points') # saved_point上一级
+    parser.add_argument('--data_file', type=str,
+                        default=r'G:\jieshun\project_data\multi_cam\8_20\points')  # saved_point上一级
     # parser.add_argument('--label_path', type=str,
     #                     default=r'G:\jieshun\project_data\2024_5_13\point(1)\point\155\155_loc03\2024-05-13_11-08-58\saved_points',
     #                     help='Path to the label directory')
@@ -214,23 +222,8 @@ def parse_args():
     parser.add_argument('--lane_direction', type=int, choices=[0, 1], default=0,
                         help='Specify lane direction along x-axis(0) or y-axis(1) (default: x)')
 
-    # parser.add_argument('--areas', nargs='+', type=float, default=[[11.94, -2.4, 19.14, 2.4], [3, -7, 11, -1.2]],
-    #                     help='Define areas as left-top and right-bottom coordinates in the format x1 y1 x2 y2, '
-    #                          'x1 y1 x2 y2, ...')  # 必须是左上、右下对应的
-
-    # parser.add_argument('--areas', nargs='+', type=float,
-    #                     default=[[-6.514750679042191, 16.40145240686459, -3.514750679042191, 9.253977181370766],
-    #                              [3.283867150065455, 16.40145240686459, 6.28814195563638, 9.253977181370766],
-    #                              [-6.514750679042191, 7.25413595637976, -3.514750679042191, 0],
-    #                              [3.283867150065455, 7.25413595637976, 6.283867150065455,0]],
-    #                     help='Define areas as left-top and right-bottom coordinates in the format x1 y1 x2 y2, '
-    #                          'x1 y1 x2 y2, ...')  # 必须是左上、右下对应的
-    # parser.add_argument('--areas', nargs='+', type=float,
-    #                     default=[[2.9138459453663663, 7.188331208487332, 8.413845945366367, 0.08731955084935972],
-    #                              [2.8476686921018706, 17.64568737467815, 8.34766869210187, 8.686314766406971]],
-    #                     help='Define areas as left-top and right-bottom coordinates in the format x1 y1 x2 y2, '
-    #                          'x1 y1 x2 y2, ...')  # 必须是左上、右下对应的
-    parser.add_argument('--coords', type=str, default=r"G:\jieshun\project_data\multi_cam\8_20\points\coords_test_2.txt", help='车位坐标文件')
+    parser.add_argument('--coords', type=str,
+                        default=r"G:\jieshun\project_data\multi_cam\8_20\points\coords_test_2.txt", help='车位坐标文件')
 
     args = parser.parse_args()
     return args
@@ -240,4 +233,3 @@ if __name__ == '__main__':
     args = parse_args()
     main(args)
     sys.stdout.log.close()
-

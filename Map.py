@@ -2,7 +2,7 @@ import os
 import cv2
 import numpy as np
 from utils import plot_one_box, cal_iou, xyxy_to_xywh, xywh_to_xyxy, updata_trace_list, draw_trace, intersect, \
-    is_point_inside_rectangle, subtract_tuples, coord_to_pixel
+    is_point_inside_rectangle, subtract_tuples, coord_to_pixel, draw_line, add_shadow_to_box
 import datetime
 from tracks import Tracks
 from tracker import Tracker
@@ -37,8 +37,8 @@ class Map:
         """
         content1 = [item for item in content if item[-8:] == 'scene_1\n']
         content2 = [item for item in content if item[-8:] == 'scene_2\n']
-        Scene1 = Scene(content1, frame_rate=frame_rate, camera_id='scene_1')
-        Scene2 = Scene(content2, frame_rate=frame_rate, camera_id='scene_2')
+        Scene1 = Scene(content1, frame_rate=frame_rate, camera_id='scene_1', camera_location=(0, 0))
+        Scene2 = Scene(content2, frame_rate=frame_rate, camera_id='scene_2', camera_location=(0, 17))
         return [Scene1, Scene2]
 
     def update(self, content):
@@ -118,7 +118,7 @@ class Map:
             if isinstance(pair, tuple):  # 确认是否为匹配对
                 track1, track2 = pair
                 distance = euclidean(track1.box_center, track2.box_center)
-                if distance <= 2:
+                if distance <= 8:
                     # 保持匹配状态
                     new_tracks.append(pair)
                 else:
@@ -213,22 +213,32 @@ class Map:
     def draw_tracks(self, img):
         for track in self.tracks_set:
             if isinstance(track, tuple):
-                track = track[1]
-            if track.confirmflag:
+                track[1].draw(img)
+                track[0].draw(img, flag=0)
+                draw_line(ax, img, track[0].box_center, track[1].box_center)
+            elif track.confirmflag:
                 track.draw(img)
+
+    def get_nearst_track(self):
+        """
+        track是tuple时返回
+        """
 
     def draw_area(self, frame):
         for area in self.areas:
             area.draw(frame)
-        self.lane.draw(frame)
+        plot_one_box(ax, [-3.2580322011818176, 22, 3.3289563490177057, 0], frame, color=(0, 0, 255))
+        plot_one_box(ax, [-3.2580322011818176, 36, 3.3289563490177057, 16], frame, color=(0, 255, 0))
+        add_shadow_to_box(ax, [-3.2580322011818176, 22-0.1, 3.3289563490177057, 16+0.1], frame)
+        # self.lane.draw(frame)
 
 
 class Scene(Tracker):
     '''
-    class Map inherit from class Tracker
+    class Scene inherit from class Tracker
     '''
 
-    def __init__(self, content, area_inf_list=None, lane_inf=None, frame_rate=6, camera_id=''):
+    def __init__(self, content, area_inf_list=None, lane_inf=None, frame_rate=6, camera_id='', camera_location=(0, 0)):
         super(Scene, self).__init__(content, frame_rate, camera_id)
         '''
         parking_id由Map分配
@@ -236,7 +246,7 @@ class Scene(Tracker):
         :param parking_file: 拿到的地图的位置信息的文件
         '''
         self.range = [(0, 0), (1, 1)]  # 该摄像头所管理的场景的范围
-        self.camera_location = (0, 0)
+        self.camera_location = camera_location
         self.tracks = []  # 检测到的所有的轨迹
         self.matched_tracks = []  # 与其他scene中的轨迹匹配上了的轨迹的列表
         self.not_matched_tracks = []  # 没有与其他scene中的轨迹匹配上的轨迹的列表
